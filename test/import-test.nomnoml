@@ -1,0 +1,10 @@
+#import: importee.nomnoml
+[Pirate|
+  [a]--[b]
+  [a]-:>[c]
+]
+[<abstract>Marauder]<:--[Pirate]
+[Pirate] - 0..7[<hello>Arrrrrr]
+[<database>db]->[Pirate]
+[db]->[rum]
+[Pirate]-> *[rum]

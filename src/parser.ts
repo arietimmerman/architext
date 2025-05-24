@@ -1,0 +1,138 @@
+import { Ranker } from 'graphre/decl/types'
+import { Config, Style, Visual } from './domain'
+import { linearParse } from './linearParse'
+import { last } from './util'
+import { styles, buildStyle } from './visuals'
+
+export { ParseError } from './linearParse'
+
+export interface ParsedDiagram {
+  root: Part
+  directives: Directive[]
+  config: Config
+}
+export interface Ast {
+  root: Part
+  directives: Directive[]
+}
+export interface Part {
+  nodes: Node[]
+  assocs: Association[]
+  lines: string[]
+}
+export interface Directive {
+  key: string
+  value: string
+}
+export interface Node {
+  id: string
+  type: string
+  attr: Record<string, string>
+  parts: Part[]
+}
+export interface Association {
+  id?: string
+  type: string
+  start: string
+  end: string
+  startLabel: { text: string }
+  endLabel: { text: string }
+}
+
+export function parse(source: string): ParsedDiagram {
+  const { root, directives } = linearParse(source)
+
+  return { root, directives, config: getConfig(directives) }
+
+  function directionToDagre(word: string): 'TB' | 'LR' {
+    if (word == 'down') return 'TB'
+    if (word == 'right') return 'LR'
+    else return 'TB'
+  }
+
+  function parseRanker(word: string | undefined): Ranker {
+    if (word == 'network-simplex' || word == 'tight-tree' || word == 'longest-path') {
+      return word
+    }
+    return 'network-simplex'
+  }
+
+  function parseCustomStyle(styleDef: string): Style {
+    const floatingKeywords = styleDef.replace(/[a-z]*=[^ ]+/g, '')
+    const titleDef = last(styleDef.match('title=([^ ]*)') || [''])
+    const bodyDef = last(styleDef.match('body=([^ ]*)') || [''])
+    return {
+      title: {
+        bold: titleDef.includes('bold') || floatingKeywords.includes('bold'),
+        underline: titleDef.includes('underline') || floatingKeywords.includes('underline'),
+        italic: titleDef.includes('italic') || floatingKeywords.includes('italic'),
+        center: !(titleDef.includes('left') || styleDef.includes('align=left')),
+      },
+      body: {
+        bold: bodyDef.includes('bold'),
+        underline: bodyDef.includes('underline'),
+        italic: bodyDef.includes('italic'),
+        center: bodyDef.includes('center'),
+      },
+      dashed: styleDef.includes('dashed'),
+      fill: last(styleDef.match('fill=([^ ]*)') || []),
+      stroke: last(styleDef.match('stroke=([^ ]*)') || []),
+      visual: (last(styleDef.match('visual=([^ ]*)') || []) || 'class') as Visual,
+      direction: directionToDagre(last(styleDef.match('direction=([^ ]*)') || [])),
+    }
+  }
+
+  function getConfig(directives: Directive[]): Config {
+    const d = Object.fromEntries(directives.map((e) => [e.key, e.value]))
+    const userStyles: { [index: string]: Style } = {}
+    for (const key in d) {
+      if (key[0] != '.') continue
+      const styleDef = d[key]
+      userStyles[key.substring(1)] = parseCustomStyle(styleDef)
+    }
+    
+    // Add styles for application and business prefixes
+    userStyles['application'] = buildStyle(
+      { visual: 'component', fill: '#dae8fc' }, // Light blue color
+      { center: true, bold: true },
+      { center: true }
+    )
+    
+    userStyles['business'] = buildStyle(
+      { visual: 'component', fill: '#fff2cc' }, // Light yellow color
+      { center: true, bold: true },
+      { center: true }
+    )
+
+    userStyles['technology'] = buildStyle(
+      { visual: 'component', fill: '#afffaf' }, // Light green color
+      { center: true, bold: true },
+      { center: true }
+    )
+    
+    return {
+      arrowSize: +d.arrowSize || 1,
+      bendSize: +d.bendSize || 0.3,
+      direction: directionToDagre(d.direction),
+      gutter: +d.gutter || 0,
+      edgeMargin: +d.edgeMargin || 0,
+      gravity: Math.round(+(d.gravity ?? 1)),
+      edges: d.edges == 'hard' ? 'hard' : 'rounded',
+      fill: (d.fill || '#eee8d5;#fdf6e3;#eee8d5;#fdf6e3').split(';'),
+      background: d.background || 'transparent',
+      fillArrows: d.fillArrows === 'true',
+      font: d.font || 'Helvetica',
+      fontSize: +d.fontSize || 12,
+      leading: +d.leading || 1.35,
+      lineWidth: +d.lineWidth || 3,
+      padding: +d.padding || 8,
+      spacing: +d.spacing || 40,
+      stroke: d.stroke || '#000000',
+      title: d.title || '',
+      zoom: +d.zoom || 1,
+      acyclicer: d.acyclicer === 'greedy' ? 'greedy' : undefined,
+      ranker: parseRanker(d.ranker),
+      styles: { ...styles, ...userStyles },
+    }
+  }
+}

@@ -1,0 +1,9 @@
+---
+layout: page
+---
+
+<script setup>
+import Diagram from './.vitepress/components/Diagram.vue'
+</script>
+
+<Diagram size="large" :fullPage="true">[&lt;business:role&gt; Customer]&#10;[&lt;business:actor&gt; Sales Rep]&#10;[&lt;business:process&gt; Order Processing]&#10;[&lt;business:function&gt; Customer Support]&#10;[&lt;business:event&gt; Order Received]&#10;[&lt;business:object&gt; Order]&#10;[&lt;business:service&gt; Customer Service]&#10;[&lt;application:component&gt; CRM System]&#10;[&lt;application:function&gt; Order Entry]&#10;[&lt;application:service&gt; CRM API]&#10;[&lt;application:interface&gt; Web Portal]&#10;[&lt;application:data&gt; Customer Record]&#10;[&lt;technology:node&gt; Web Server]&#10;[&lt;technology:device&gt; Mobile Device]&#10;[&lt;technology:system_software&gt; OS]&#10;[&lt;technology:communication_network&gt; Internet]&#10;[&lt;technology:artifact&gt; Deployment Package]&#10;[&lt;technology:service&gt; Hosting]&#10;[&lt;technology:communication_network&gt; VPN]&#10;[&lt;technology:application&gt; Monitoring Tool]&#10;[Customer] -|&gt; [Order Received]&#10;[Order Received] -|&gt; [Order Processing]&#10;[Order Processing] -&gt; [Customer]&#10;[Order Processing] -|&gt; [Customer Support]&#10;[Order Processing] -&gt; [Order]&#10;[Order] -&gt; [CRM System]&#10;[CRM System] --:&gt; [Order Entry]&#10;[Order Entry] -&gt; [CRM API]&#10;[CRM API] --:&gt; [Web Portal]&#10;[Web Portal] -&gt; [Customer Record]&#10;[Sales Rep] .--. [Web Portal]&#10;[Customer Support] .--. [CRM System]&#10;[CRM System] .--. [Web Server]&#10;[Web Server] .--. [OS]&#10;[Web Server] o-&gt; [Internet]&#10;[Mobile Device] .--. [Web Portal]&#10;[Deployment Package] +- [Web Server]&#10;[Hosting] .--. [Web Server]&#10;[VPN] .--. [CRM System]&#10;[Monitoring Tool] .--. [Web Server]</Diagram>

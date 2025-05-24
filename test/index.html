@@ -1,0 +1,410 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>test nomnoml</title>
+  <link rel="shortcut icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAABGdBTUEAALGPC/xhBQAAAAlwSFlzAAAOwgAADsIBFShKgAAAABp0RVh0U29mdHdhcmUAUGFpbnQuTkVUIHYzLjUuMTAw9HKhAAAAcUlEQVQ4T2OgGZgxY8b/tLQ0DAyVJgxAitEBUQbMyMv735+SAlaMDogyAKQZRIMUo2NnZ2fiDUAHVVVVuDWDNOUBTUfHUGkwAAUqlIkJQIovr1yJgulvADoO19Eh3gBCYOASFQxQxQB0TFSiogNgYAAA2pPVp9Ngpg4AAAAASUVORK5CYII=">
+  <style>
+    body { background-color: #fdf6e3; padding: 0; margin: 10px 10px 100px 10px; overflow-y: scroll }
+    h1 { font-size: 20px; font-family: Monaco, "Lucida Console", monospace }
+
+    svg, img { height: 280px; max-width: 400px; }
+    canvas { max-height: 280px; }
+    iframe { border: 1px solid #cacaca }
+    .testcase {
+      display: inline-block;
+      margin: 5px;
+      vertical-align: top;
+      background: #eee8d5;
+      border-radius: 5px;
+      height: 320px;
+    }
+    .testcase h1 {
+      font-size: 12px;
+      margin: 10px 10px 5px 10px;
+    }
+    .crashed { background: red; }
+    .crashed h1 { color: #fff }
+    .crashed canvas { width: 20px; }
+  </style>
+  <style TestSuite>
+    .testsuite { font-size: 13px; margin: 10px; font-family: Monaco, "Lucida Console", monospace }
+    .testsuite summary { color: #657b83; padding: 5px; background: #0001; }
+    .success, .failure, .ignored { margin: 0px; padding: 1px 5px; color: #eee; cursor: pointer; }
+    .success:hover, .failure:hover { background: rgba(0,0,0,0.1) }
+    .success { color: #5e7d00 }
+    .failure { color: #b03911 }
+    .ignored { color: #bababa }
+    .success::before { content: '✓ ' }
+    .failure::before { content: '✗ ' }
+    .ignored::before { content: '- ' }
+    .details { margin: 1px 5px 5px 35px; color: #b03911 }
+  </style>
+</head>
+
+<body>
+
+  <div class=testcase>
+    <h1>Canvas</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#.hello: underline stroke=teal fill=#ffa
+[Pirate|
+  [a]--[b]
+  [a]-:>[c]
+]
+[<abstract>Marauder]<:--[Pirate]
+[Pirate] - 0..7[<hello>Arrrrrr]
+[<database>db]->[Pirate]
+[db]->[rum]
+[Pirate]-> *[rum]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Svg</h1>
+    <div nomnoml=svg>
+      <script type="text/vnd.nomnoml">
+#.hello: underline stroke=teal fill=#ffa
+[Pirate|
+  [a]--[b]
+  [a]-:>[c]
+]
+[<abstract>Marauder]<:--[Pirate]
+[Pirate] - 0..7[<hello>Arrrrrr]
+[<database>db]->[Pirate]
+[db]->[rum]
+[Pirate]-> *[rum]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>CLI output</h1>
+    <img src="output.svg">
+  </div>
+
+  <div class=testcase>
+    <h1>Built in styles</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[<frame>frame|[<note> note]]
+[<package>package|[<reference> reference]]
+[class|items: Object\[\]] - [<hidden> hidden]
+[hidden] -- [<label> label]
+[hidden] - [<instance> instance]
+[<abstract> abstract] <:-- [<instance> instance]
+[<table>table|a|b] -- [abstract]
+[<package> package] <- [<frame> frame]
+[<database> database|disk] <:- [<start> start]
+[start] -/- [<usecase> usecase]
+[<end> end] -/- [<state> state]
+[state] - [<actor> actor|subtitle]
+[<lollipop>lollipop] - [<socket>socket]
+[<choice> choice] - [<sync>sync]
+[sync] - [<input> input]
+[<sender> sender] <-+ [<receiver> receiver]
+[receiver] +-+ [<transceiver>transceiver]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Custom direction</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#.right: direction=right
+[A] -> [<right>B|
+  [X]->[Y]
+]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Table</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[<table> Long table title|
+  nuts  | 89    ||
+  bolts | 18
+]
+
+[<table> shapes|
+  number  | 5 ||
+  capsule | [<state>cell] |
+  auto;row;break
+]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Non-boxy shapes</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+[<choice> choice|first|second] <:-o [<end> end]
+[<usecase> usecase|row 2|row 3] -:> [<actor> actor]
+[end] -:> [<database> database]
+[actor] -> [<frame>frame|[note]]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Custom styles</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+#.box: fill=pink italic bold visual=rhomb
+[<box>box]
+#.blob: fill=limegreen dashed underline visual=ellipse
+[<blob>blob]
+#.quux: fill=pink italic bold visual=rhomb
+[<quux>quux]
+      </script>
+    </div>
+  </div>
+  
+  <div class=testcase>
+    <h1>Layout bug</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#gutter: 1
+#spacing: 20
+#padding: 5
+[quux]
+[foo]-[bar]
+[foo]-[baz]
+[foo]-[quux]
+[quux]-[baz]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Ranker</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#padding: 4
+#ranker: longest-path
+[a] -> [b]
+[a] -> [c]
+[c] -> [d]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Gravity</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#padding: 4
+#gravity: 2
+[a] -> [b]
+[a] _> [c]
+[c] -> [d]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Associations</h1>
+    <div nomnoml=svg>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[a] --> [depend]
+[b] -:> [impl]
+[c] +-> [compose]
+[d] o-> [aggr]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Associations sockets</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[e] (-->o [req]
+[f] -->o [dep]
+[g] -(o [ball-socket]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Associations misc</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[i] -- [note]
+[j] -/- [hidden]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Weightless Right</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+[a] _> [c]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Edge linebreak,<br/>background</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#background: #aaa
+#gutter: 1
+#stroke: #eee8d5
+#fill: #aaa
+[Left] left`association <-> right`association [Right]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Self referential</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+[Banana] <-> self [Banana]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Label placement</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#direction: right
+#spacing: 40
+#edgeMargin: -5
+[A] L - R [C1]
+[A] L - R [C2]
+[A] L - R [C3]
+[C1] L - R [B]
+[C2] L - R [B]
+[C3] L - R [B]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Graph size</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#spacing: 15
+#gutter: 1
+#padding: 3
+#background: #aaa4
+[a] - [foo]
+[foo] - [b]
+[a] - [bar]
+[bar] - [b]
+[a] - [b]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Edge label size</h1>
+    <div nomnoml=canvas>
+      <script type="text/vnd.nomnoml">
+#background: #aaa4
+[a] - long label [c]
+[Long name] -  [d]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Text heuristic</h1>
+    <div nomnoml=svg>
+      <script type="text/vnd.nomnoml">
+#zoom: 0.5
+#direction: right
+[iii]
+[🍌🐵]
+[MMM]
+[ABC<T>]
+[漢字漢字]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Text measure</h1>
+    <div nomnoml=svg text-measure-canvas>
+      <script type="text/vnd.nomnoml">
+#zoom: 0.5
+#direction: right
+[iii]
+[🍌🐵]
+[MMM]
+[ABC<T>]
+[漢字漢字]
+      </script>
+    </div>
+  </div>
+
+  <div class=testcase>
+    <h1>Text heuristic<br/>large font</h1>
+    <div nomnoml=svg>
+      <script type="text/vnd.nomnoml">
+#zoom: 0.5
+#font: Arial
+#fontSize: 20
+#direction: right
+[iii]
+[🍌🐵]
+[MMM]
+[ABC<T>]
+[漢字漢字]
+      </script>
+    </div>
+  </div>
+  
+  <div class=testcase >
+    <h1>long text</h1>
+    <div nomnoml=svg style="transform: rotate(90deg) scale(0.7); max-width: 100px; margin: -100px 0;">
+      <script type="text/vnd.nomnoml">
+[First, Nomnoml is an amazing piece of software. Thank you all for creating something so epic. ]
+      </script>
+    </div>
+  </div>
+
+  <script src="../node_modules/dagre/dist/dagre.min.js"></script>
+  <script src="../dist/nomnoml.js"></script>
+
+  <script>
+    function mountNomnoml() {
+      for (const el of document.querySelectorAll('[nomnoml=canvas]>script[type="text/vnd.nomnoml"]'))
+        mountCanvas(el.parentElement, el.innerText)
+
+      for (const el of document.querySelectorAll('[nomnoml=svg]>script[type="text/vnd.nomnoml"]'))
+        mountSvg(el.parentElement, el.innerText)
+
+      function mountCanvas(host, source){
+        try { nomnoml.draw(host.appendChild(document.createElement('canvas')), source) }
+        catch (e) { host.parentElement.classList.add('crashed') }
+      }
+
+      function mountSvg(host, source){
+        var canvas = host.attributes['text-measure-canvas']
+        try { host.innerHTML = nomnoml.renderSvg(source, canvas ? document : undefined) }
+        catch (e) { host.parentElement.classList.add('crashed') }
+      }
+    }
+
+    mountNomnoml()
+  </script>
+
+</body>
+</html>
