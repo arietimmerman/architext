@@ -25,7 +25,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
-import { draw, renderSvg } from 'nomnoml'
+import * as nomnoml from 'nomnoml'
 import { EditorView } from '@codemirror/view'
 import { EditorState } from '@codemirror/state'
 import { nomnoml } from './nomnoml-mode'
@@ -185,7 +185,7 @@ const updateDiagram = () => {
       const source = editor.state.doc.toString()
       
       // Render the diagram as SVG
-      const svg = renderSvg(source)
+      const svg = nomnoml.renderSvg(source)
       svgContainer.value.innerHTML = svg
       lastValidSource = source
       
@@ -212,7 +212,7 @@ const updateDiagram = () => {
       
       // If we have a last valid source, render that instead
       if (lastValidSource && svgContainer.value) {
-        svgContainer.value.innerHTML = renderSvg(lastValidSource)
+        svgContainer.value.innerHTML = nomnoml.renderSvg(lastValidSource)
       }
     }
   }
@@ -221,7 +221,7 @@ const updateDiagram = () => {
 const exportSvg = () => {
   if (editor && svgContainer.value) {
     const source = editor.state.doc.toString()
-    const svg = renderSvg(source)
+    const svg = nomnoml.renderSvg(source)
     const blob = new Blob([svg], { type: 'image/svg+xml' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')

@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted, useSlots, defineProps, watch } from 'vue'
-import { renderSvgAdvanced, parse } from '@nomnoml/nomnoml'
+import { renderSvgAdvanced, renderSvg, parse } from '@nomnoml/nomnoml'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { nomnoml, errorField, addErrorEffect, cachedComponentsEffect } from './nomnomlMode'

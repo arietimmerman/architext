@@ -33,6 +33,10 @@ export default defineConfig({
     ['link', { rel: 'canonical', href: 'https://architext.app' }],
   ],
   vite: {
+    server: {
+      // Listen on all addresses for containers/remote dev
+      host: true
+    },
     resolve: {
       alias: {
         '@nomnoml': fileURLToPath(new URL('../../src', import.meta.url))

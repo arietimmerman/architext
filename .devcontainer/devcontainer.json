@@ -1,0 +1,20 @@
+{
+  "name": "Architext Dev",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:20",
+  "remoteUser": "node",
+  "updateRemoteUserUID": true,
+  "features": {},
+  "forwardPorts": [5173, 5174],
+  "postCreateCommand": "set -e; npm ci; cd architext && npm ci",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "Vue.volar",
+        "Vue.vscode-typescript-vue-plugin"
+      ]
+    }
+  }
+}
+
