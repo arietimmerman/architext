@@ -1,5 +1,6 @@
 export {
   draw,
+  renderSvgAdvanced,
   renderSvg,
   compileFile,
   processImports,

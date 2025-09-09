@@ -39,7 +39,9 @@ export default defineConfig({
     },
     resolve: {
       alias: {
-        '@nomnoml': fileURLToPath(new URL('../../src', import.meta.url))
+        '@nomnoml': fileURLToPath(new URL('../../src', import.meta.url)),
+        // Allow modules that import 'nomnoml' (used by architext exporter)
+        'nomnoml': fileURLToPath(new URL('../../src', import.meta.url))
       }
     }
   },

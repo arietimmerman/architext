@@ -4,6 +4,8 @@ import { renderSvgAdvanced, renderSvg, parse } from '@nomnoml/nomnoml'
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { nomnoml, errorField, addErrorEffect, cachedComponentsEffect } from './nomnomlMode'
+import { buildDrawioXmlFromSource } from '../../../architext/src/export-drawio'
+import { reparentAndSerialize } from '../../../architext/src/ast-rewrite'
 
 // Constants for zoom control
 const ZOOM_STEP = 0.1
@@ -32,6 +34,7 @@ let dragStartClientY = 0
 let dragStartNodeX = 0
 let dragStartNodeY = 0
 let dragOriginalTransform = ''
+let currentDropTargetId = null
 
 const props = defineProps({
     direction: {
@@ -201,6 +204,66 @@ function upsertPosDirective(source, nodeId, x, y) {
   return lines.join('\n')
 }
 
+function removePosDirective(source, nodeId) {
+  const lines = source.split('\n')
+  const posRegex = /^#pos:\s*(.*)$/i
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(posRegex)
+    if (m) {
+      const map = new Map()
+      const text = m[1]
+      const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)/g
+      let mm
+      while ((mm = re.exec(text))) {
+        const id = (mm[1] ?? mm[2]).trim()
+        map.set(id, true)
+      }
+      if (map.has(nodeId)) {
+        map.delete(nodeId)
+        const fmtName = (s) => (/\s|;/.test(s) ? `"${s}"` : s)
+        // We don't have stored coordinates anymore; just rebuild remaining pairs as-is
+        const rebuilt = Array.from(map.keys())
+          .map((k) => `${fmtName(k)}=0,0`)
+          .join('; ')
+        if (rebuilt) lines[i] = `#pos: ${rebuilt}`
+        else lines.splice(i, 1)
+      }
+      break
+    }
+  }
+  return lines.join('\n')
+}
+
+function upsertParentDirective(source, childId, parentId) {
+  const lines = source.split('\n')
+  const parentRegex = /^#parent:\s*(.*)$/i
+  const fmtName = (s) => (/\s|;/.test(s) ? `"${s}"` : s)
+  let found = false
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(parentRegex)
+    if (m) {
+      const map = new Map()
+      const text = m[1]
+      const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*(?:"([^"]+)"|([^;\s]+))/g
+      let mm
+      while ((mm = re.exec(text))) {
+        const id = (mm[1] ?? mm[2]).trim()
+        const parent = (mm[3] ?? mm[4]).trim()
+        map.set(id, parent)
+      }
+      map.set(childId, parentId)
+      const rebuilt = Array.from(map.entries())
+        .map(([k, v]) => `${fmtName(k)}=${fmtName(v)}`)
+        .join('; ')
+      lines[i] = `#parent: ${rebuilt}`
+      found = true
+      break
+    }
+  }
+  if (!found) lines.unshift(`#parent: ${fmtName(childId)}=${fmtName(parentId)}`)
+  return lines.join('\n')
+}
+
 function findNodeGroupElement(target) {
   let el = target
   while (el && el !== container.value) {
@@ -250,6 +313,28 @@ const onWindowMouseMove = (ev) => {
     const base = dragOriginalTransform ? dragOriginalTransform + ' ' : ''
     group.setAttribute('transform', `${base}translate(${tx}, ${ty})`)
   }
+
+  // Highlight potential drop target
+  const els = document.elementsFromPoint(ev.clientX, ev.clientY)
+  let targetId = null
+  for (const e of els) {
+    const g = e.closest && e.closest('g[data-name]')
+    if (g) {
+      const id = g.getAttribute('data-name')
+      if (id && id !== draggingNodeId) { targetId = id; break }
+    }
+  }
+  if (targetId !== currentDropTargetId) {
+    if (currentDropTargetId && container.value) {
+      const prev = container.value.querySelector(`g[data-name="${currentDropTargetId}"]`)
+      prev?.classList?.remove('drop-target')
+    }
+    if (targetId && container.value) {
+      const next = container.value.querySelector(`g[data-name="${targetId}"]`)
+      next?.classList?.add('drop-target')
+    }
+    currentDropTargetId = targetId
+  }
 }
 
 const onWindowMouseUp = (ev) => {
@@ -259,10 +344,28 @@ const onWindowMouseUp = (ev) => {
   const newX = dragStartNodeX + dx
   const newY = dragStartNodeY + dy
   const source = editor.state.doc.toString()
-  const updated = upsertPosDirective(source, draggingNodeId, newX, newY)
+  let text = source
+  const els = document.elementsFromPoint(ev.clientX, ev.clientY)
+  let containerId = null
+  for (const e of els) {
+    const g = e.closest && e.closest('g[data-name]')
+    if (g) {
+      const id = g.getAttribute('data-name')
+      if (id && id !== draggingNodeId) { containerId = id; break }
+    }
+  }
+  if (containerId) text = removePosDirective(text, draggingNodeId)
+  else text = upsertPosDirective(text, draggingNodeId, newX, newY)
+  const updated = reparentAndSerialize(text, draggingNodeId, containerId || 'root')
   editor.dispatch({ changes: { from: 0, to: source.length, insert: updated } })
   isDraggingNode = false
   draggingNodeId = null
+  // Clear highlight
+  if (currentDropTargetId && container.value) {
+    const prev = container.value.querySelector(`g[data-name="${currentDropTargetId}"]`)
+    prev?.classList?.remove('drop-target')
+  }
+  currentDropTargetId = null
 }
 
 onMounted(() => {
@@ -340,6 +443,23 @@ const exportSvg = () => {
     const link = document.createElement('a')
     link.href = url
     link.download = 'diagram.svg'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+}
+
+// Export draw.io
+const exportDrawio = () => {
+  if (editor && container.value) {
+    const source = editor.state.doc.toString()
+    const xml = buildDrawioXmlFromSource(source)
+    const blob = new Blob([xml], { type: 'application/xml' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'diagram.drawio'
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
@@ -427,6 +547,9 @@ const updateDiagramTransform = () => {
                 </button>
                 <button class="control-button" @click="exportSvg" title="Export SVG">
                     <span class="icon">↓</span>
+                </button>
+                <button class="control-button" @click="exportDrawio" title="Export draw.io">
+                    <span class="icon">⤓</span>
                 </button>
             </div>
             <div 
@@ -601,6 +724,14 @@ const updateDiagramTransform = () => {
 .diagram-container :deep(g[data-name]) {
     cursor: grab;
     pointer-events: all;
+}
+
+/* Highlight potential drop target container */
+.diagram-container :deep(g.drop-target) path,
+.diagram-container :deep(g.drop-target) rect,
+.diagram-container :deep(g.drop-target) ellipse {
+    stroke: #4a90e2 !important;
+    stroke-width: 2.5px !important;
 }
 
 .diagram-container.size-small svg {

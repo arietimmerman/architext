@@ -47,6 +47,7 @@ function parseAndRender(
   // Apply position directives like: #pos: NodeId=x,y
   try {
     const posMap: Record<string, { x: number; y: number }> = {}
+    const parentMap: Record<string, string> = {}
     for (const d of parsedDiagram.directives) {
       if (d.key.trim().toLowerCase() === 'pos' || d.key.trim().toLowerCase() === 'position') {
         // Parse entries of the form: Name=x,y; "Name With Space"=x,y
@@ -58,6 +59,16 @@ function parseAndRender(
           const x = parseFloat(m[3])
           const y = parseFloat(m[4])
           if (!Number.isNaN(x) && !Number.isNaN(y)) posMap[id] = { x, y }
+        }
+      } else if (d.key.trim().toLowerCase() === 'parent') {
+        // Format: child=Parent; "Child"=Parent; Parent can be "root" to detach
+        const text = d.value
+        const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*(?:"([^"]+)"|([^;\s]+))/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(text))) {
+          const child = (m[1] ?? m[2]).trim()
+          const parent = (m[3] ?? m[4]).trim()
+          parentMap[child] = parent
         }
       }
     }
@@ -79,6 +90,46 @@ function parseAndRender(
         }
       }
       applyPositions(parsedDiagram.root)
+    }
+
+    if (Object.keys(parentMap).length) {
+      // Build index of nodes to their current parent Part
+      type Entry = { node: any; parentPart: any }
+      const byId = new Map<string, Entry>()
+      const indexParts = (part: any) => {
+        for (const n of part.nodes || []) {
+          byId.set(n.id, { node: n, parentPart: part })
+          for (const cp of n.parts || []) indexParts(cp)
+        }
+      }
+      indexParts(parsedDiagram.root)
+
+      const rootPart = parsedDiagram.root as any
+      for (const [childId, parentId] of Object.entries(parentMap)) {
+        const entry = byId.get(childId)
+        if (!entry) continue
+        const srcPart = entry.parentPart
+        let dstPart = rootPart
+        if (parentId.toLowerCase() !== 'root') {
+          const pEntry = byId.get(parentId)
+          if (pEntry && pEntry.node?.parts?.[0]) dstPart = pEntry.node.parts[0]
+          else continue
+        }
+        if (srcPart === dstPart) continue
+        // Remove from source
+        srcPart.nodes = (srcPart.nodes || []).filter((n: any) => n.id !== childId)
+        // Add to destination
+        dstPart.nodes = dstPart.nodes || []
+        dstPart.nodes.push(entry.node)
+        // Update index for child's subtree
+        const reindex = (part: any) => {
+          for (const n of part.nodes || []) {
+            byId.set(n.id, { node: n, parentPart: part })
+            for (const cp of n.parts || []) reindex(cp)
+          }
+        }
+        reindex(dstPart)
+      }
     }
   } catch (e) {
     // Non-fatal: ignore malformed pos directives

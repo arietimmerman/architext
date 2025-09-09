@@ -8,17 +8,8 @@ const empty = false
 const filled = true
 
 export function getPath(config: Config, r: LayoutedAssoc): Vec[] {
-  const path = r.path!.slice(1, -1)
-  const endDir = normalize(diff(path[path.length - 2], last(path)))
-  const startDir = normalize(diff(path[1], path[0]))
-  const size = (config.spacing * config.arrowSize) / 30
-  const head = 0
-  const end = path.length - 1
-  const copy = path.map((p) => ({ x: p.x, y: p.y }))
-  const tokens = r.type.split(/[-_]/)
-  copy[head] = add(copy[head], mult(startDir, size * terminatorSize(tokens[0])))
-  copy[end] = add(copy[end], mult(endDir, size * terminatorSize(last(tokens))))
-  return copy
+  // Use the orthogonal path provided by the layouter (ports + rays already included)
+  return r.path!.slice(1, -1)
 }
 
 function terminatorSize(id: string): number {
@@ -33,14 +24,22 @@ function terminatorSize(id: string): number {
   return 0
 }
 
-export function drawTerminators(g: Graphics, config: Config, r: LayoutedAssoc) {
-  const start = r.path![1]
-  const end = r.path![r.path!.length - 2]
-  const path = r.path!.slice(1, -1)
+export function drawTerminators(
+  g: Graphics,
+  config: Config,
+  r: LayoutedAssoc,
+  drawnPath?: Vec[]
+) {
+  // Prefer the actually drawn path so marker direction is collinear
+  const path = drawnPath ? drawnPath.slice() : r.path!.slice(1, -1)
+  const start = drawnPath ? path[0] : r.path![1]
+  const end = drawnPath ? last(path) : r.path![r.path!.length - 2]
 
   const tokens = r.type.split(/[-_]/)
+  // End marker uses forward path
   drawArrowEnd(last(tokens), path, end)
-  drawArrowEnd(tokens[0], path.reverse(), start)
+  // Start marker uses reversed path for direction at the start
+  drawArrowEnd(tokens[0], path.slice().reverse(), start)
 
   function drawArrowEnd(id: string, path: Vec[], end: Vec) {
     const dir = normalize(diff(path[path.length - 2], last(path)))

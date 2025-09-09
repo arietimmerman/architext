@@ -317,7 +317,8 @@ export function routeBestWithRays(
   bSize: { w: number; h: number },
   dir: Direction,
   obstacles: Rect[],
-  margin: number
+  obstacleMargin: number,
+  lead: number
 ): { full: Vec[]; startPort: Vec; endPort: Vec } {
   const pairs: Array<{ s: Side; e: Side }> = [
     { s: 'right', e: 'left' },
@@ -342,17 +343,18 @@ export function routeBestWithRays(
     const bTop = bCenter.y - bSize.h / 2
     const bBottom = bCenter.y + bSize.h / 2
 
+    // Create lead rays: move away from the box border along the chosen side normal
     const sr: Vec = { x: sp.x, y: sp.y }
-    if (pair.s === 'left') sr.x = aLeft - margin
-    if (pair.s === 'right') sr.x = aRight + margin
-    if (pair.s === 'top') sr.y = aTop - margin
-    if (pair.s === 'bottom') sr.y = aBottom + margin
+    if (pair.s === 'left') sr.x = sp.x - lead
+    if (pair.s === 'right') sr.x = sp.x + lead
+    if (pair.s === 'top') sr.y = sp.y - lead
+    if (pair.s === 'bottom') sr.y = sp.y + lead
 
     const er: Vec = { x: ep.x, y: ep.y }
-    if (pair.e === 'left') er.x = bLeft - margin
-    if (pair.e === 'right') er.x = bRight + margin
-    if (pair.e === 'top') er.y = bTop - margin
-    if (pair.e === 'bottom') er.y = bBottom + margin
+    if (pair.e === 'left') er.x = ep.x - lead
+    if (pair.e === 'right') er.x = ep.x + lead
+    if (pair.e === 'top') er.y = ep.y - lead
+    if (pair.e === 'bottom') er.y = ep.y + lead
 
     const mid = routeOrthogonal(sr, er, obstacles)
     const full = simplify([sp, sr, ...mid, er, ep])
@@ -363,6 +365,6 @@ export function routeBestWithRays(
     }
   }
   // Fallback to a single-port choice if everything failed (shouldn't happen)
-  if (!best) return routeWithRays(aCenter, aSize, bCenter, bSize, dir, obstacles, margin)
+  if (!best) return routeWithRays(aCenter, aSize, bCenter, bSize, dir, obstacles, obstacleMargin)
   return best
 }

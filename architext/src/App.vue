@@ -8,6 +8,7 @@
           <button @click="zoomOut" title="Zoom Out">-</button>
           <button @click="resetZoom" title="Reset Zoom">↺</button>
           <button @click="exportSvg" title="Export SVG">↓</button>
+          <button @click="exportDrawio" title="Export draw.io">⤓</button>
         </div>
         <div class="diagram-wrapper" 
              ref="diagramWrapper"
@@ -35,6 +36,8 @@ import { StateEffect, StateField } from '@codemirror/state'
 import { lineNumbers } from '@codemirror/view'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
+import { buildDrawioXmlFromSource } from './export-drawio'
+import { reparentAndSerialize } from './ast-rewrite'
 
 const editorContainer = ref<HTMLElement | null>(null)
 const diagramContainer = ref<HTMLElement | null>(null)
@@ -62,6 +65,7 @@ let dragStartClientY = 0
 let dragStartNodeX = 0
 let dragStartNodeY = 0
 let dragOriginalTransform = ''
+let currentDropTargetId: string | null = null
 
 // Define a state effect for updating error decorations
 const addErrorEffect = StateEffect.define<{line: number, column: number} | null>()
@@ -195,11 +199,11 @@ const updateDiagram = () => {
       // Render the diagram as SVG and capture layout
       const r = nomnoml.renderSvgAdvanced(source)
       svgContainer.value.innerHTML = r.svg
-      // Build a quick lookup for node positions
+      // Build a quick lookup for node positions and sizes
       lastLayout = {}
       const collect = (part: any) => {
         for (const n of part.nodes || []) {
-          lastLayout[n.id] = { x: n.x, y: n.y }
+          lastLayout[n.id] = { x: n.x, y: n.y, w: n.width, h: n.height }
           for (const cp of n.parts || []) collect(cp)
         }
       }
@@ -249,6 +253,21 @@ const exportSvg = () => {
     document.body.removeChild(link)
     URL.revokeObjectURL(url)
   }
+}
+
+const exportDrawio = () => {
+  if (!editor) return
+  const source = editor.state.doc.toString()
+  const xml = buildDrawioXmlFromSource(source)
+  const blob = new Blob([xml], { type: 'application/xml' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'diagram.drawio'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
 }
 
 // Helpers to update position directives in the source text
@@ -335,6 +354,30 @@ const onWindowMouseMove = (ev: MouseEvent) => {
     const base = dragOriginalTransform ? dragOriginalTransform + ' ' : ''
     group.setAttribute('transform', `${base}translate(${tx}, ${ty})`)
   }
+
+  // Highlight potential drop target under pointer (excluding self)
+  if (svgContainer.value) {
+    const els = document.elementsFromPoint(ev.clientX, ev.clientY)
+    let targetId: string | null = null
+    for (const e of els) {
+      const g = (e as HTMLElement).closest?.('g[data-name]') as SVGGElement | null
+      if (g) {
+        const id = g.getAttribute('data-name')
+        if (id && id !== draggingNodeId) { targetId = id; break }
+      }
+    }
+    if (targetId !== currentDropTargetId) {
+      if (currentDropTargetId) {
+        const prev = svgContainer.value.querySelector(`g[data-name="${currentDropTargetId}"]`) as SVGGElement | null
+        prev?.classList.remove('drop-target')
+      }
+      if (targetId) {
+        const next = svgContainer.value.querySelector(`g[data-name="${targetId}"]`) as SVGGElement | null
+        next?.classList.add('drop-target')
+      }
+      currentDropTargetId = targetId
+    }
+  }
 }
 
 const onWindowMouseUp = (ev: MouseEvent) => {
@@ -343,16 +386,67 @@ const onWindowMouseUp = (ev: MouseEvent) => {
   const dy = (ev.clientY - dragStartClientY) / currentZoom
   const newX = dragStartNodeX + dx
   const newY = dragStartNodeY + dy
-  // Commit: update source with #pos directive
-  const source = editor.state.doc.toString()
-  const updated = upsertPosDirective(source, draggingNodeId, newX, newY)
+  // Determine potential container under pointer using DOM hit testing
+  let source = editor.state.doc.toString()
+  const els = document.elementsFromPoint(ev.clientX, ev.clientY)
+  let containerId: string | null = null
+  for (const e of els) {
+    const g = (e as HTMLElement).closest?.('g[data-name]') as SVGGElement | null
+    if (g) {
+      const id = g.getAttribute('data-name')
+      if (id && id !== draggingNodeId) { containerId = id; break }
+    }
+  }
+  if (containerId) {
+    // Moving into a container: remove fixed position for the child so layout can place it
+    source = removePosDirective(source, draggingNodeId)
+  } else {
+    // Keep explicit position when not reparenting (or moving to root)
+    source = upsertPosDirective(source, draggingNodeId, newX, newY)
+  }
+  // Rewrite source to nested syntax instead of #parent directive
+  const updated = reparentAndSerialize(source, draggingNodeId, containerId || 'root')
   editor.dispatch({
     changes: { from: 0, to: source.length, insert: updated },
   })
   // Reset dragging state
   isDraggingNode = false
   draggingNodeId = null
+  // Clear highlight
+  if (currentDropTargetId && svgContainer.value) {
+    const prev = svgContainer.value.querySelector(`g[data-name="${currentDropTargetId}"]`) as SVGGElement | null
+    prev?.classList.remove('drop-target')
+  }
+  currentDropTargetId = null
   // Re-render will be triggered by update listener
+}
+
+function removePosDirective(source: string, nodeId: string): string {
+  const lines = source.split('\n')
+  const posRegex = /^#pos:\s*(.*)$/i
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(posRegex)
+    if (m) {
+      const map = new Map<string, { x: number; y: number }>()
+      const text = m[1]
+      const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)/g
+      let mm: RegExpExecArray | null
+      while ((mm = re.exec(text))) {
+        const id = (mm[1] ?? mm[2]).trim()
+        map.set(id, { x: parseFloat(mm[3]), y: parseFloat(mm[4]) })
+      }
+      if (map.delete(nodeId)) {
+        const fmtName = (s: string) => (/\s|;/.test(s) ? `"${s}"` : s)
+        const rebuilt = Array.from(map.entries())
+          .map(([k, v]) => `${fmtName(k)}=${v.x.toFixed(1)},${v.y.toFixed(1)}`)
+          .join('; ')
+        if (rebuilt) lines[i] = `#pos: ${rebuilt}`
+        else lines.splice(i, 1)
+      }
+      break
+    }
+  }
+  return lines.join('\n')
 }
 
 onMounted(() => {
@@ -511,6 +605,14 @@ h1 {
   pointer-events: all;
 }
 
+/* Highlight potential drop target container */
+.svg-container :global(g.drop-target) path,
+.svg-container :global(g.drop-target) rect,
+.svg-container :global(g.drop-target) ellipse {
+  stroke: #4a90e2 !important;
+  stroke-width: 2.5px !important;
+}
+
 .error-message {
   color: #e74c3c;
   padding: 10px;
@@ -573,3 +675,4 @@ h1 {
   color: #cb4b16;
 }
 </style> 
+// (parent directive helper removed in favor of AST rewrite)

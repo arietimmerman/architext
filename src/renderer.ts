@@ -89,8 +89,14 @@ export function render(graphics: Graphics, config: Config, compartment: Layouted
     
     g.save()
     g.translate(config.gutter, config.gutter)
-    for (const r of compartment.assocs) renderRelation(r)
+    const pending: { rel: LayoutedAssoc; path: Vec[] }[] = []
+    for (const r of compartment.assocs) {
+      const p = renderRelation(r)
+      pending.push({ rel: r, path: p })
+    }
     for (const n of compartment.nodes) renderNode(n, level)
+    // Draw terminators on top of nodes to avoid being hidden
+    for (const { rel, path } of pending) drawTerminators(g, config, rel, path)
     g.restore()
     g.restore()
   }
@@ -177,7 +183,7 @@ export function render(graphics: Graphics, config: Config, compartment: Layouted
     }
   }
 
-  function renderRelation(r: LayoutedAssoc) {
+  function renderRelation(r: LayoutedAssoc): Vec[] {
     const path = getPath(config, r)
 
     g.fillStyle(config.stroke)
@@ -196,7 +202,7 @@ export function render(graphics: Graphics, config: Config, compartment: Layouted
       } else strokePath(path)
     }
 
-    drawTerminators(g, config, r)
+    return path
   }
 
   function setBackground() {

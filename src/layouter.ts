@@ -135,6 +135,11 @@ export function layout(measurer: Measurer, config: Config, ast: Part): LayoutedP
       // Compute ports and route orthogonally
       const dir = styledConfig.direction ?? config.direction
       const margin = config.edgeMargin + config.padding + 2
+      // Slightly longer lead-in to keep a clear straight segment before first bend
+      const lead = Math.max(
+        12,
+        (config.spacing * config.arrowSize) * 0.6 + config.lineWidth + config.padding * 0.25
+      )
       const obstacles = Object.entries(nodes)
         .filter(([id]) => id !== edgeObj.v && id !== edgeObj.w)
         .map(([_, n]) => ({
@@ -150,7 +155,8 @@ export function layout(measurer: Measurer, config: Config, ast: Part): LayoutedP
         { w: end.width, h: end.height },
         dir,
         obstacles,
-        margin
+        margin,
+        lead
       )
       rel.path = [{ x: start.x, y: start.y }, ...full, { x: end.x, y: end.y }]
 
