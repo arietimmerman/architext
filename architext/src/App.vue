@@ -43,6 +43,7 @@ const svgContainer = ref<HTMLElement | null>(null)
 const error = ref('')
 let editor: EditorView | null = null
 let lastValidSource: string | null = null
+let lastLayout: Record<string, { x: number; y: number }> = {}
 let currentZoom = 1
 const ZOOM_STEP = 0.1
 const MIN_ZOOM = 0.5
@@ -54,6 +55,13 @@ let startX = 0
 let startY = 0
 let translateX = 0
 let translateY = 0
+let isDraggingNode = false
+let draggingNodeId: string | null = null
+let dragStartClientX = 0
+let dragStartClientY = 0
+let dragStartNodeX = 0
+let dragStartNodeY = 0
+let dragOriginalTransform = ''
 
 // Define a state effect for updating error decorations
 const addErrorEffect = StateEffect.define<{line: number, column: number} | null>()
@@ -184,9 +192,18 @@ const updateDiagram = () => {
       clearErrorHighlighting()
       const source = editor.state.doc.toString()
       
-      // Render the diagram as SVG
-      const svg = nomnoml.renderSvg(source)
-      svgContainer.value.innerHTML = svg
+      // Render the diagram as SVG and capture layout
+      const r = nomnoml.renderSvgAdvanced(source)
+      svgContainer.value.innerHTML = r.svg
+      // Build a quick lookup for node positions
+      lastLayout = {}
+      const collect = (part: any) => {
+        for (const n of part.nodes || []) {
+          lastLayout[n.id] = { x: n.x, y: n.y }
+          for (const cp of n.parts || []) collect(cp)
+        }
+      }
+      collect(r.layout)
       lastValidSource = source
       
       // Update the transform
@@ -234,6 +251,110 @@ const exportSvg = () => {
   }
 }
 
+// Helpers to update position directives in the source text
+function upsertPosDirective(source: string, nodeId: string, x: number, y: number): string {
+  const lines = source.split('\n')
+  const posRegex = /^#pos:\s*(.*)$/i
+  const fmtName = (s: string) => (/[\s;]/.test(s) ? `"${s.replace(/"/g, '\\"')}"` : s)
+  let found = false
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(posRegex)
+    if (m) {
+      const map = new Map<string, { x: number; y: number }>()
+      const text = m[1]
+      const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)/g
+      let mm: RegExpExecArray | null
+      while ((mm = re.exec(text))) {
+        const id = (mm[1] ?? mm[2]).trim()
+        map.set(id, { x: parseFloat(mm[3]), y: parseFloat(mm[4]) })
+      }
+      map.set(nodeId, { x, y })
+      const rebuilt = Array.from(map.entries())
+        .map(([k, v]) => `${fmtName(k)}=${v.x.toFixed(1)},${v.y.toFixed(1)}`)
+        .join('; ')
+      lines[i] = `#pos: ${rebuilt}`
+      found = true
+      break
+    }
+  }
+  if (!found) {
+    lines.unshift(`#pos: ${fmtName(nodeId)}=${x.toFixed(1)},${y.toFixed(1)}`)
+  }
+  return lines.join('\n')
+}
+
+function findNodeGroupElement(target: HTMLElement | null): SVGElement | null {
+  let el: HTMLElement | null = target
+  while (el && el !== svgContainer.value) {
+    if ((el as any).getAttribute && (el as any).getAttribute('data-name')) return el as any
+    el = el.parentElement
+  }
+  return null
+}
+
+const onSvgMouseDown = (ev: MouseEvent) => {
+  if (!svgContainer.value) return
+  const group = findNodeGroupElement(ev.target as HTMLElement)
+  if (group) {
+    const id = (group as any).getAttribute('data-name')
+    if (id && lastLayout[id]) {
+      isDraggingNode = true
+      draggingNodeId = id
+      dragStartClientX = ev.clientX
+      dragStartClientY = ev.clientY
+      dragStartNodeX = lastLayout[id].x
+      dragStartNodeY = lastLayout[id].y
+      dragOriginalTransform = (group as any).getAttribute('transform') || ''
+      ev.preventDefault()
+      ev.stopPropagation()
+      // Visual hint
+      (group as any).style.cursor = 'grabbing'
+    }
+  }
+}
+
+const onWindowMouseMove = (ev: MouseEvent) => {
+  if (!isDraggingNode || !draggingNodeId) return
+  const dx = (ev.clientX - dragStartClientX) / currentZoom
+  const dy = (ev.clientY - dragStartClientY) / currentZoom
+  const newX = dragStartNodeX + dx
+  const newY = dragStartNodeY + dy
+  // Live preview by translating the node group
+  const findGroup = () => {
+    const groups = svgContainer.value?.querySelectorAll('g[data-name]') as NodeListOf<SVGGElement> | undefined
+    if (!groups) return null
+    for (const g of Array.from(groups)) {
+      if (g.getAttribute('data-name') === draggingNodeId) return g
+    }
+    return null
+  }
+  const group = findGroup()
+  if (group) {
+    const tx = (newX - lastLayout[draggingNodeId].x).toFixed(1)
+    const ty = (newY - lastLayout[draggingNodeId].y).toFixed(1)
+    const base = dragOriginalTransform ? dragOriginalTransform + ' ' : ''
+    group.setAttribute('transform', `${base}translate(${tx}, ${ty})`)
+  }
+}
+
+const onWindowMouseUp = (ev: MouseEvent) => {
+  if (!isDraggingNode || !draggingNodeId || !editor) return
+  const dx = (ev.clientX - dragStartClientX) / currentZoom
+  const dy = (ev.clientY - dragStartClientY) / currentZoom
+  const newX = dragStartNodeX + dx
+  const newY = dragStartNodeY + dy
+  // Commit: update source with #pos directive
+  const source = editor.state.doc.toString()
+  const updated = upsertPosDirective(source, draggingNodeId, newX, newY)
+  editor.dispatch({
+    changes: { from: 0, to: source.length, insert: updated },
+  })
+  // Reset dragging state
+  isDraggingNode = false
+  draggingNodeId = null
+  // Re-render will be triggered by update listener
+}
+
 onMounted(() => {
   if (editorContainer.value) {
     // Initialize CodeMirror
@@ -259,6 +380,13 @@ onMounted(() => {
 
     // Initial render
     updateDiagram()
+    // Bind mouse handlers for dragging
+    if (svgContainer.value) {
+      // Use capture to preempt wrapper panning handlers
+      svgContainer.value.addEventListener('mousedown', onSvgMouseDown, { capture: true } as any)
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+    }
   }
 })
 
@@ -267,6 +395,11 @@ onBeforeUnmount(() => {
     editor.destroy()
     editor = null
   }
+  if (svgContainer.value) {
+    svgContainer.value.removeEventListener('mousedown', onSvgMouseDown, { capture: true } as any)
+  }
+  window.removeEventListener('mousemove', onWindowMouseMove)
+  window.removeEventListener('mouseup', onWindowMouseUp)
 })
 </script>
 
@@ -370,6 +503,12 @@ h1 {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
+}
+
+/* Improve hit testing and cursor for draggable nodes */
+.svg-container :global(g[data-name]) {
+  cursor: grab;
+  pointer-events: all;
 }
 
 .error-message {

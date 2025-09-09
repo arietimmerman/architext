@@ -1,6 +1,7 @@
 declare module 'nomnoml' {
   export function draw(canvas: HTMLCanvasElement, source: string, scale?: number): { config: any };
   export function renderSvg(source: string): string;
+  export function renderSvgAdvanced(source: string): { svg: string; layout: any };
   export function compileFile(filePath: string): Promise<string>;
   export function processImports(source: string): string;
   export function processAsyncImports(source: string): Promise<string>;

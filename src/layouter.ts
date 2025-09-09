@@ -5,6 +5,7 @@ import * as dagre from 'dagre'
 import { layouters, styles } from './visuals'
 import { EdgeLabel, GraphLabel, GraphNode } from 'graphre/decl/types'
 import { Part, Node, Association } from './parser'
+import { routeBestWithRays } from './orthogonalRouter'
 
 type Quadrant = 1 | 2 | 3 | 4
 
@@ -104,62 +105,104 @@ export function layout(measurer: Measurer, config: Config, ast: Part): LayoutedP
         nodes[name].y = node.y
       }
     }
+    // Override positions with explicit coordinates when provided via node attributes
+    for (const n of Object.values(nodes)) {
+      const ax = (n as any).attr?.x
+      const ay = (n as any).attr?.y
+      const px = ax != null ? Number(ax) : undefined
+      const py = ay != null ? Number(ay) : undefined
+      if (px != null && !Number.isNaN(px)) n.x = px
+      if (py != null && !Number.isNaN(py)) n.y = py
+    }
     let left = 0
     let right = 0
     let top = 0
     let bottom = 0
 
+    // Precompute which nodes are fixed
+    const isFixed: Record<string, boolean> = {}
+    for (const [id, n] of Object.entries(nodes)) {
+      const ax = (n as any).attr?.x
+      const ay = (n as any).attr?.y
+      isFixed[id] = ax != null || ay != null
+    }
+
     for (const edgeObj of g.edges()) {
-      const edge = g.edge(edgeObj)
       const start = nodes[edgeObj.v]
       const end = nodes[edgeObj.w]
       const rel = rels[edgeObj.name]
-      if (edge && edge.points) {
-        rel.path = [start, ...edge.points, end].map(toPoint)
 
-        const startP = rel.path[1]
-        const endP = rel.path[rel.path.length - 2]
-        layoutLabel(rel.startLabel, startP, adjustQuadrant(quadrant(startP, start) ?? 4, start, end))
-        layoutLabel(rel.endLabel, endP, adjustQuadrant(quadrant(endP, end) ?? 2, end, start))
-        
-        const startLabelX = rel.startLabel.x ?? 0
-        const startLabelY = rel.startLabel.y ?? 0
-        const startLabelWidth = rel.startLabel.width ?? 0
-        const startLabelHeight = rel.startLabel.height ?? 0
-        const endLabelX = rel.endLabel.x ?? 0
-        const endLabelY = rel.endLabel.y ?? 0
-        const endLabelWidth = rel.endLabel.width ?? 0
-        const endLabelHeight = rel.endLabel.height ?? 0
+      // Compute ports and route orthogonally
+      const dir = styledConfig.direction ?? config.direction
+      const margin = config.edgeMargin + config.padding + 2
+      const obstacles = Object.entries(nodes)
+        .filter(([id]) => id !== edgeObj.v && id !== edgeObj.w)
+        .map(([_, n]) => ({
+          left: n.x - (n.width ?? 0) / 2 - margin,
+          right: n.x + (n.width ?? 0) / 2 + margin,
+          top: n.y - (n.height ?? 0) / 2 - margin,
+          bottom: n.y + (n.height ?? 0) / 2 + margin,
+        }))
+      const { full } = routeBestWithRays(
+        { x: start.x, y: start.y },
+        { w: start.width, h: start.height },
+        { x: end.x, y: end.y },
+        { w: end.width, h: end.height },
+        dir,
+        obstacles,
+        margin
+      )
+      rel.path = [{ x: start.x, y: start.y }, ...full, { x: end.x, y: end.y }]
 
-        left = Math.min(
-          left,
-          startLabelX,
-          endLabelX,
-          ...edge.points.map((e: Vec) => e.x)
-        )
-        right = Math.max(
-          right,
-          startLabelX + startLabelWidth,
-          endLabelX + endLabelWidth,
-          ...edge.points.map((e: Vec) => e.x)
-        )
-        top = Math.min(
-          top,
-          startLabelY,
-          endLabelY,
-          ...edge.points.map((e: Vec) => e.y)
-        )
-        bottom = Math.max(
-          bottom,
-          startLabelY + startLabelHeight,
-          endLabelY + endLabelHeight,
-          ...edge.points.map((e: Vec) => e.y)
-        )
-      }
+      const startP = rel.path[1]
+      const endP = rel.path[rel.path.length - 2]
+      layoutLabel(rel.startLabel, startP, adjustQuadrant(quadrant(startP, start) ?? 4, start, end))
+      layoutLabel(rel.endLabel, endP, adjustQuadrant(quadrant(endP, end) ?? 2, end, start))
+
+      const startLabelX = rel.startLabel.x ?? 0
+      const startLabelY = rel.startLabel.y ?? 0
+      const startLabelWidth = rel.startLabel.width ?? 0
+      const startLabelHeight = rel.startLabel.height ?? 0
+      const endLabelX = rel.endLabel.x ?? 0
+      const endLabelY = rel.endLabel.y ?? 0
+      const endLabelWidth = rel.endLabel.width ?? 0
+      const endLabelHeight = rel.endLabel.height ?? 0
+
+      const pts = rel.path
+      left = Math.min(left, startLabelX, endLabelX, ...pts.map((e: Vec) => e.x))
+      right = Math.max(
+        right,
+        startLabelX + startLabelWidth,
+        endLabelX + endLabelWidth,
+        ...pts.map((e: Vec) => e.x)
+      )
+      top = Math.min(top, startLabelY, endLabelY, ...pts.map((e: Vec) => e.y))
+      bottom = Math.max(
+        bottom,
+        startLabelY + startLabelHeight,
+        endLabelY + endLabelHeight,
+        ...pts.map((e: Vec) => e.y)
+      )
     }
+    // Include node extents to capture nodes that have explicit positions outside dagre bounds
+    for (const n of Object.values(nodes)) {
+      const nx = n.x
+      const ny = n.y
+      const nw = n.width ?? 0
+      const nh = n.height ?? 0
+      const nleft = nx - nw / 2
+      const nright = nx + nw / 2
+      const ntop = ny - nh / 2
+      const nbottom = ny + nh / 2
+      left = Math.min(left, nleft)
+      right = Math.max(right, nright)
+      top = Math.min(top, ntop)
+      bottom = Math.max(bottom, nbottom)
+    }
+
     const graph = g.graph()
-    const width = Math.max(graph.width! + (left < 0 ? -left : 0), right - left)
-    const height = Math.max(graph.height! + (top < 0 ? -top : 0), bottom - top)
+    const width = Math.max((graph.width ?? 0) + (left < 0 ? -left : 0), right - left)
+    const height = Math.max((graph.height ?? 0) + (top < 0 ? -top : 0), bottom - top)
     const graphHeight = height ? height + 2 * config.gutter : 0
     const graphWidth = width ? width + 2 * config.gutter : 0
 

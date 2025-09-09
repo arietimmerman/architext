@@ -44,6 +44,45 @@ function parseAndRender(
   scale: number
 ) {
   const parsedDiagram = parse(code)
+  // Apply position directives like: #pos: NodeId=x,y
+  try {
+    const posMap: Record<string, { x: number; y: number }> = {}
+    for (const d of parsedDiagram.directives) {
+      if (d.key.trim().toLowerCase() === 'pos' || d.key.trim().toLowerCase() === 'position') {
+        // Parse entries of the form: Name=x,y; "Name With Space"=x,y
+        const text = d.value
+        const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)/g
+        let m: RegExpExecArray | null
+        while ((m = re.exec(text))) {
+          const id = (m[1] ?? m[2]).trim()
+          const x = parseFloat(m[3])
+          const y = parseFloat(m[4])
+          if (!Number.isNaN(x) && !Number.isNaN(y)) posMap[id] = { x, y }
+        }
+      }
+    }
+
+    if (Object.keys(posMap).length) {
+      const applyPositions = (part: any) => {
+        if (!part || !part.nodes) return
+        for (const n of part.nodes) {
+          const p = posMap[n.id]
+          if (p) {
+            n.attr = n.attr || ({} as any)
+            n.attr.x = String(p.x)
+            n.attr.y = String(p.y)
+          }
+          // Recurse into child parts
+          if (n.parts) {
+            for (const cp of n.parts) applyPositions(cp)
+          }
+        }
+      }
+      applyPositions(parsedDiagram.root)
+    }
+  } catch (e) {
+    // Non-fatal: ignore malformed pos directives
+  }
   const config = parsedDiagram.config
   const measurer = createMeasurer(config, graphics)
   const graphLayout = layout(measurer, config, parsedDiagram.root)

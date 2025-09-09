@@ -24,6 +24,14 @@ let isPanning = false
 let startX = 0
 let startY = 0
 let lastValidSource = ''
+let lastLayout = {}
+let isDraggingNode = false
+let draggingNodeId = null
+let dragStartClientX = 0
+let dragStartClientY = 0
+let dragStartNodeX = 0
+let dragStartNodeY = 0
+let dragOriginalTransform = ''
 
 const props = defineProps({
     direction: {
@@ -110,6 +118,15 @@ const renderDiagram = (content = null) => {
     let r = renderSvgAdvanced(processed)
     const svg = r.svg
     container.value.innerHTML = svg
+    // collect node positions for dragging
+    lastLayout = {}
+    const collect = (part) => {
+      for (const n of part.nodes || []) {
+        lastLayout[n.id] = { x: n.x, y: n.y }
+        for (const cp of n.parts || []) collect(cp)
+      }
+    }
+    collect(r.layout)
     lastValidSource = source
     
     // Cache the valid components
@@ -154,6 +171,100 @@ const renderDiagram = (content = null) => {
   }
 }
 
+// Helpers for manual positioning
+function upsertPosDirective(source, nodeId, x, y) {
+  const lines = source.split('\n')
+  const posRegex = /^#pos:\s*(.*)$/i
+  const fmtName = (s) => (/\s|;/.test(s) ? `"${s.replace(/\"/g, '\\"')}"` : s)
+  let found = false
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(posRegex)
+    if (m) {
+      const map = new Map()
+      const text = m[1]
+      const re = /(?:^|;)\s*(?:"([^"]+)"|([^=;]+))\s*=\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)/g
+      let mm
+      while ((mm = re.exec(text))) {
+        const id = (mm[1] ?? mm[2]).trim()
+        map.set(id, { x: parseFloat(mm[3]), y: parseFloat(mm[4]) })
+      }
+      map.set(nodeId, { x, y })
+      const rebuilt = Array.from(map.entries())
+        .map(([k, v]) => `${fmtName(k)}=${v.x.toFixed(1)},${v.y.toFixed(1)}`)
+        .join('; ')
+      lines[i] = `#pos: ${rebuilt}`
+      found = true
+      break
+    }
+  }
+  if (!found) lines.unshift(`#pos: ${fmtName(nodeId)}=${x.toFixed(1)},${y.toFixed(1)}`)
+  return lines.join('\n')
+}
+
+function findNodeGroupElement(target) {
+  let el = target
+  while (el && el !== container.value) {
+    if (el?.getAttribute && el.getAttribute('data-name')) return el
+    el = el.parentElement
+  }
+  return null
+}
+
+const onSvgMouseDown = (ev) => {
+  const group = findNodeGroupElement(ev.target)
+  if (group) {
+    const id = group.getAttribute('data-name')
+    if (id && lastLayout[id]) {
+      isDraggingNode = true
+      draggingNodeId = id
+      dragStartClientX = ev.clientX
+      dragStartClientY = ev.clientY
+      dragStartNodeX = lastLayout[id].x
+      dragStartNodeY = lastLayout[id].y
+      dragOriginalTransform = group.getAttribute('transform') || ''
+      ev.preventDefault()
+      ev.stopPropagation()
+      group.style.cursor = 'grabbing'
+    }
+  }
+}
+
+const onWindowMouseMove = (ev) => {
+  if (!isDraggingNode || !draggingNodeId) return
+  const dx = (ev.clientX - dragStartClientX) / currentZoom
+  const dy = (ev.clientY - dragStartClientY) / currentZoom
+  const newX = dragStartNodeX + dx
+  const newY = dragStartNodeY + dy
+  const findGroup = () => {
+    const groups = container.value?.querySelectorAll('g[data-name]')
+    if (!groups) return null
+    for (const g of Array.from(groups)) {
+      if (g.getAttribute('data-name') === draggingNodeId) return g
+    }
+    return null
+  }
+  const group = findGroup()
+  if (group) {
+    const tx = (newX - lastLayout[draggingNodeId].x).toFixed(1)
+    const ty = (newY - lastLayout[draggingNodeId].y).toFixed(1)
+    const base = dragOriginalTransform ? dragOriginalTransform + ' ' : ''
+    group.setAttribute('transform', `${base}translate(${tx}, ${ty})`)
+  }
+}
+
+const onWindowMouseUp = (ev) => {
+  if (!isDraggingNode || !draggingNodeId || !editor) return
+  const dx = (ev.clientX - dragStartClientX) / currentZoom
+  const dy = (ev.clientY - dragStartClientY) / currentZoom
+  const newX = dragStartNodeX + dx
+  const newY = dragStartNodeY + dy
+  const source = editor.state.doc.toString()
+  const updated = upsertPosDirective(source, draggingNodeId, newX, newY)
+  editor.dispatch({ changes: { from: 0, to: source.length, insert: updated } })
+  isDraggingNode = false
+  draggingNodeId = null
+}
+
 onMounted(() => {
     // Get the slot content directly from the default slot
     const slotContent = slots.default?.();   
@@ -182,6 +293,12 @@ onMounted(() => {
     }
 
     renderDiagram(diagramContent)
+    if (container.value) {
+      // Use capture to avoid competing panning handlers
+      container.value.addEventListener('mousedown', onSvgMouseDown, { capture: true })
+      window.addEventListener('mousemove', onWindowMouseMove)
+      window.addEventListener('mouseup', onWindowMouseUp)
+    }
 })
 
 // Watch for changes to the fullPage prop
@@ -205,6 +322,9 @@ watch(() => props.fullPage, (newValue) => {
 
 onUnmounted(() => {
     editor?.destroy()
+    if (container.value) container.value.removeEventListener('mousedown', onSvgMouseDown, { capture: true })
+    window.removeEventListener('mousemove', onWindowMouseMove)
+    window.removeEventListener('mouseup', onWindowMouseUp)
 })
 
 
@@ -475,6 +595,12 @@ const updateDiagramTransform = () => {
 .diagram-container svg {
     width: 100%;
     height: auto;
+}
+
+/* Improve hit testing and cursor for draggable nodes */
+.diagram-container :deep(g[data-name]) {
+    cursor: grab;
+    pointer-events: all;
 }
 
 .diagram-container.size-small svg {
