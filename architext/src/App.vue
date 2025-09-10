@@ -37,7 +37,7 @@ import { lineNumbers } from '@codemirror/view'
 import { keymap } from '@codemirror/view'
 import { defaultKeymap } from '@codemirror/commands'
 import { buildDrawioXmlFromSource } from './export-drawio'
-import { reparentAndSerialize } from './ast-rewrite'
+import { reparentAndSerialize, addAssociationAndSerialize, removeAssociationAndSerialize } from './ast-rewrite'
 
 const editorContainer = ref<HTMLElement | null>(null)
 const diagramContainer = ref<HTMLElement | null>(null)
@@ -46,7 +46,8 @@ const svgContainer = ref<HTMLElement | null>(null)
 const error = ref('')
 let editor: EditorView | null = null
 let lastValidSource: string | null = null
-let lastLayout: Record<string, { x: number; y: number }> = {}
+let lastLayout: Record<string, { x: number; y: number; w?: number; h?: number }> = {}
+let lastRels: Record<string, { id: string; start: string; end: string; type: string }> = {}
 let currentZoom = 1
 const ZOOM_STEP = 0.1
 const MIN_ZOOM = 0.5
@@ -66,6 +67,8 @@ let dragStartNodeX = 0
 let dragStartNodeY = 0
 let dragOriginalTransform = ''
 let currentDropTargetId: string | null = null
+let connectSourceId: string | null = null
+let connectorDot: SVGCircleElement | null = null
 
 // Define a state effect for updating error decorations
 const addErrorEffect = StateEffect.define<{line: number, column: number} | null>()
@@ -201,6 +204,7 @@ const updateDiagram = () => {
       svgContainer.value.innerHTML = r.svg
       // Build a quick lookup for node positions and sizes
       lastLayout = {}
+      lastRels = {}
       const collect = (part: any) => {
         for (const n of part.nodes || []) {
           lastLayout[n.id] = { x: n.x, y: n.y, w: n.width, h: n.height }
@@ -208,6 +212,13 @@ const updateDiagram = () => {
         }
       }
       collect(r.layout)
+      const collectRels = (part: any) => {
+        for (const a of part.assocs || []) {
+          if (a.id) lastRels[a.id] = { id: a.id, start: a.start, end: a.end, type: a.type }
+        }
+        for (const n of part.nodes || []) for (const cp of n.parts || []) collectRels(cp)
+      }
+      collectRels(r.layout)
       lastValidSource = source
       
       // Update the transform
@@ -421,6 +432,103 @@ const onWindowMouseUp = (ev: MouseEvent) => {
   // Re-render will be triggered by update listener
 }
 
+function ensureConnectorDot(svg: SVGSVGElement, nodeId: string) {
+  if (!lastLayout[nodeId]) return
+  const pos = lastLayout[nodeId]
+  const cx = pos.x + (pos.w || 0) / 2 + 6
+  const cy = pos.y
+  if (!connectorDot) {
+    connectorDot = document.createElementNS('http://www.w3.org/2000/svg', 'circle') as SVGCircleElement
+    connectorDot.setAttribute('r', '5')
+    connectorDot.setAttribute('fill', '#4a90e2')
+    connectorDot.setAttribute('stroke', '#fff')
+    connectorDot.setAttribute('stroke-width', '2')
+    connectorDot.style.cursor = 'pointer'
+    svg.appendChild(connectorDot)
+    connectorDot.addEventListener('click', (e) => {
+      e.stopPropagation()
+      connectSourceId = nodeId
+      connectorDot?.setAttribute('fill', '#e24a4a')
+    })
+  }
+  connectorDot.setAttribute('cx', cx.toFixed(1))
+  connectorDot.setAttribute('cy', cy.toFixed(1))
+  connectorDot.setAttribute('data-for', nodeId)
+  connectorDot.style.display = 'block'
+}
+
+function hideConnectorDot() {
+  if (connectorDot) connectorDot.style.display = 'none'
+}
+
+function onSvgMouseOver(ev: MouseEvent) {
+  const target = ev.target as HTMLElement
+  const g = target.closest('g[data-name]') as SVGGElement | null
+  if (!g || !svgContainer.value) return
+  const nodeId = g.getAttribute('data-name') || ''
+  const svg = svgContainer.value.querySelector('svg') as SVGSVGElement | null
+  if (!svg) return
+  ensureConnectorDot(svg, nodeId)
+}
+
+function onSvgMouseOut(ev: MouseEvent) {
+  const target = ev.target as HTMLElement
+  const g = target.closest('g[data-name]') as SVGGElement | null
+  if (!g) return
+  if (!connectSourceId) hideConnectorDot()
+}
+
+function promptConnectionType(): string | null {
+  const options = [
+    { key: '1', name: 'Association (solid)', type: '-' },
+    { key: '2', name: 'Association (dashed)', type: '--' },
+    { key: '3', name: 'Flow (arrow)', type: '->' },
+    { key: '4', name: 'Generalization', type: '-|>' },
+    { key: '5', name: 'Aggregation', type: 'o-' },
+    { key: '6', name: 'Composition', type: '+-' },
+    { key: '7', name: 'Dependency', type: '-:>' },
+  ]
+  const msg = 'Select connection type:\n' + options.map((o) => `${o.key}. ${o.name}`).join('\n')
+  const choice = window.prompt(msg, '3')
+  const found = options.find((o) => o.key === choice)
+  return found ? found.type : null
+}
+
+function onSvgClick(ev: MouseEvent) {
+  if (!svgContainer.value || !editor) return
+  const target = ev.target as HTMLElement
+  // Delete connector
+  const relGroup = target.closest('g[data-rel]') as SVGGElement | null
+  if (relGroup) {
+    const relId = relGroup.getAttribute('data-rel') || ''
+    const r = lastRels[relId]
+    if (r) {
+      const ok = window.confirm(`Delete connection ${r.start} ${r.type} ${r.end}?`)
+      if (ok) {
+        const source = editor.state.doc.toString()
+        const updated = removeAssociationAndSerialize(source, r.start, r.end, r.type)
+        editor.dispatch({ changes: { from: 0, to: source.length, insert: updated } })
+      }
+      return
+    }
+  }
+  // Create connector if a source is selected
+  const nodeGroup = target.closest('g[data-name]') as SVGGElement | null
+  if (nodeGroup && connectSourceId) {
+    const targetId = nodeGroup.getAttribute('data-name') || ''
+    if (targetId && targetId !== connectSourceId) {
+      const type = promptConnectionType()
+      if (type) {
+        const source = editor.state.doc.toString()
+        const updated = addAssociationAndSerialize(source, connectSourceId, targetId, type)
+        editor.dispatch({ changes: { from: 0, to: source.length, insert: updated } })
+      }
+    }
+    connectSourceId = null
+    hideConnectorDot()
+  }
+}
+
 function removePosDirective(source: string, nodeId: string): string {
   const lines = source.split('\n')
   const posRegex = /^#pos:\s*(.*)$/i
@@ -480,6 +588,9 @@ onMounted(() => {
       svgContainer.value.addEventListener('mousedown', onSvgMouseDown, { capture: true } as any)
       window.addEventListener('mousemove', onWindowMouseMove)
       window.addEventListener('mouseup', onWindowMouseUp)
+      svgContainer.value.addEventListener('mouseover', onSvgMouseOver)
+      svgContainer.value.addEventListener('mouseout', onSvgMouseOut)
+      svgContainer.value.addEventListener('click', onSvgClick)
     }
   }
 })
@@ -491,6 +602,9 @@ onBeforeUnmount(() => {
   }
   if (svgContainer.value) {
     svgContainer.value.removeEventListener('mousedown', onSvgMouseDown, { capture: true } as any)
+    svgContainer.value.removeEventListener('mouseover', onSvgMouseOver)
+    svgContainer.value.removeEventListener('mouseout', onSvgMouseOut)
+    svgContainer.value.removeEventListener('click', onSvgClick)
   }
   window.removeEventListener('mousemove', onWindowMouseMove)
   window.removeEventListener('mouseup', onWindowMouseUp)

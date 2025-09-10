@@ -115,3 +115,64 @@ export function reparentAndSerialize(source: string, childId: string, parentId: 
   const body = serializePart(root, '')
   return dirText ? dirText + '\n' + body : body
 }
+
+export function addAssociationAndSerialize(
+  source: string,
+  startId: string,
+  endId: string,
+  type: string
+): string {
+  const { root, directives } = parse(source)
+
+  // Build parent chain for each node
+  type Entry = { node: Node; parentPart: Part; chain: Part[] }
+  const byId = new Map<string, Entry>()
+  function walk(part: Part, chain: Part[]) {
+    for (const n of part.nodes || []) {
+      byId.set(n.id, { node: n, parentPart: part, chain })
+      for (const cp of n.parts || []) walk(cp, [...chain, cp])
+    }
+  }
+  walk(root, [root])
+
+  const a = byId.get(startId)
+  const b = byId.get(endId)
+  if (!a || !b) return source
+
+  // Find lowest common ancestor part
+  let lca: Part = root
+  const minLen = Math.min(a.chain.length, b.chain.length)
+  for (let i = 0; i < minLen; i++) {
+    if (a.chain[i] === b.chain[i]) lca = a.chain[i]
+    else break
+  }
+  lca.assocs = lca.assocs || []
+  lca.assocs.push({ type, start: startId, end: endId, startLabel: { text: '' }, endLabel: { text: '' } })
+
+  const dirText = (directives || [])
+    .map((d: any) => `#${d.key}: ${d.value}`)
+    .join('\n')
+  const body = serializePart(root, '')
+  return dirText ? dirText + '\n' + body : body
+}
+
+export function removeAssociationAndSerialize(
+  source: string,
+  startId: string,
+  endId: string,
+  type: string
+): string {
+  const { root, directives } = parse(source)
+  const strip = (part: Part) => {
+    part.assocs = (part.assocs || []).filter(
+      (a: Association) => !(a.start === startId && a.end === endId && a.type === type)
+    )
+    for (const n of part.nodes || []) for (const cp of n.parts || []) strip(cp)
+  }
+  strip(root)
+  const dirText = (directives || [])
+    .map((d: any) => `#${d.key}: ${d.value}`)
+    .join('\n')
+  const body = serializePart(root, '')
+  return dirText ? dirText + '\n' + body : body
+}

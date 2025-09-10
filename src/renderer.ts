@@ -186,6 +186,11 @@ export function render(graphics: Graphics, config: Config, compartment: Layouted
   function renderRelation(r: LayoutedAssoc): Vec[] {
     const path = getPath(config, r)
 
+    g.save()
+    g.setData('rel', r.id!)
+    g.setData('from', r.start)
+    g.setData('to', r.end)
+
     g.fillStyle(config.stroke)
     g.setFont(config.font, config.fontSize, 'normal', 'normal')
 
@@ -201,6 +206,8 @@ export function render(graphics: Graphics, config: Config, compartment: Layouted
         g.restore()
       } else strokePath(path)
     }
+
+    g.restore()
 
     return path
   }
